@@ -1,3 +1,4 @@
+import os
 from prediction_bias import ModelPredictionBias
 import torch
 import torchvision
@@ -6,17 +7,17 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from tiny_imagenet_dataset import TinyImageNet
 import numpy as np
-DEVICE  = "cuda" if torch.cuda.is_available() else "cpu"
 
-def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names):
-    """Create visualization plots for model prediction bias analysis."""
+def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names, save_dir: str = "bias_analysis_plots"):
+    """Create and save visualization plots for model prediction bias analysis."""
     
-    # Create a figure with multiple subplots
-    fig = plt.figure(figsize=(20, 15))
+    # Create save directory if it doesn't exist
+    os.makedirs(save_dir, exist_ok=True)
     
     # 1. Accuracy Distribution Plot
-    plt.subplot(2, 2, 1)
+    plt.figure(figsize=(10, 7))
     accuracies = []
     categories = []
     for category in ['Easy', 'Medium', 'Hard']:
@@ -28,9 +29,12 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names):
     sns.boxplot(x=categories, y=accuracies)
     plt.title('Accuracy Distribution by Category')
     plt.ylabel('Accuracy')
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'accuracy_distribution.png'), dpi=300, bbox_inches='tight')
+    plt.close()
     
     # 2. Bias Comparison Plot
-    plt.subplot(2, 2, 2)
+    plt.figure(figsize=(10, 7))
     categories = ['Easy', 'Medium', 'Hard']
     mean_gn = [category_stats[cat]['mean_gn'] for cat in categories]
     mean_gp = [category_stats[cat]['mean_gp'] for cat in categories]
@@ -49,9 +53,12 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names):
     plt.title('Comparison of Positive and Negative Bias')
     plt.xticks(x, categories)
     plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'bias_comparison.png'), dpi=300, bbox_inches='tight')
+    plt.close()
     
     # 3. Per-Class Accuracy Plot
-    plt.subplot(2, 1, 2)
+    plt.figure(figsize=(15, 8))
     all_accuracies = []
     class_indices = []
     category_colors = []
@@ -82,8 +89,10 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names):
                 rotation=45, ha='right', va='bottom')
     
     plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, 'per_class_accuracy.png'), dpi=300, bbox_inches='tight')
+    plt.close()
     
-    # 4. Create a separate figure for detailed class analysis
+    # 4. Detailed Class Analysis Plot
     plt.figure(figsize=(15, 10))
     sorted_gn = []
     sorted_gp = []
@@ -102,9 +111,12 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(save_dir, 'detailed_class_analysis.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
-def analyze_model_bias(model_path: str, device: str = 'cuda'):
+    print(f"All plots have been saved in the '{save_dir}' directory.")
+
+def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = 'cuda'):
     """Analyze model prediction bias on CIFAR-100 test set."""
     
     # Set up data transforms
@@ -112,12 +124,14 @@ def analyze_model_bias(model_path: str, device: str = 'cuda'):
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))
     ])
-    
+    if mode:
     # Load CIFAR-100 test set
-    testset = torchvision.datasets.CIFAR100(root='./data', train=False,
+        testset = torchvision.datasets.CIFAR100(root='./data', train=False,
                                            download=True, transform=transform)
-    testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-    
+        testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
+    else:
+        testset = load_data()
+        testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
     # Load model
     model = torchvision.models.get_model("resnet18", num_classes=100)
     model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
@@ -159,9 +173,25 @@ def analyze_model_bias(model_path: str, device: str = 'cuda'):
         for idx in stats['class_indices']:
             print(f"  {class_names[idx]}: {mpb.class_correct[idx]/mpb.class_total[idx]:.4f}")
         print()
-    plot_bias_analysis(category_stats, mpb, class_names)
-        
+    plot_bias_analysis(category_stats, mpb, class_names, save_dir)
+
+def load_data():
+    # Data loading code
+    normalize = transforms.Normalize(mean=[0.4802, 0.4481, 0.3975],
+                                     std=[0.2302, 0.2265, 0.2262])
+
+    print("Loading validation data")
+    val_transform = transforms.Compose([
+        transforms.ToTensor(),
+        normalize,
+    ])
+    dataset_test = TinyImageNet('./data', split='val', download=False, transform=val_transform)
+    print("Creating data loaders")
+
+    return dataset_test
+
+
 if __name__ == "__main__":
     ckpt_path = "./save_post_cifar100/ipc50/ckpt.pth"
-    analyze_model_bias(ckpt_path)
-
+    save_dir = "./sreL2_cirfar"  # Specify your desired directory name
+    analyze_model_bias(ckpt_path, save_dir=save_dir,mod=True)
