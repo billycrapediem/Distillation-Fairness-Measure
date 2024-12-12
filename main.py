@@ -118,18 +118,32 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, save_dir: str =
 
     print(f"All plots have been saved in the '{save_dir}' directory.")
 
-def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = 'cuda'):
-    """Analyze model prediction bias on CIFAR-100 test set."""
+def analyze_model_bias(model_path: str, save_dir: str, mode=False, device: str = 'cuda'):
+    """Analyze model prediction bias on CIFAR-100 test set.
     
+    Args:
+        model_path (str): Path to the model checkpoint
+        save_dir (str): Directory to save analysis plots
+        mode (bool): Mode flag for different data loading methods
+        device (str): Device to run the model on
+    
+    Returns:
+        dict: Dictionary containing bias metrics including CAD
+    """
     # Set up data transforms
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761))
     ])
+
+    # Load dataset based on mode
     if mode:
-    # Load CIFAR-100 test set
-        testset = torchvision.datasets.CIFAR100(root='/scratch/bzhang44/SRe2L/SRe2L/*small_dataset/data', train=False,
-                                           download=True, transform=transform)
+        testset = torchvision.datasets.CIFAR100(
+            root='/scratch/bzhang44/SRe2L/SRe2L/*small_dataset/data', 
+            train=False,
+            download=True, 
+            transform=transform
+        )
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
         model = torchvision.models.get_model("resnet18", num_classes=200)
         model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
@@ -137,13 +151,12 @@ def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = '
         model = nn.DataParallel(model).cuda()
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["state_dict"])
-        model = model.to(device)
     else:
         testset = load_data()
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-        model = create_model('resnet18',model_path)
-    # Load model
+        model = create_model('resnet18', model_path)
     
+    model = model.to(device)
     model.eval()
     
     # Initialize bias calculator
@@ -157,12 +170,27 @@ def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = '
             outputs = model(images)
             mpb.update(outputs, labels)
     
-    # Compute metrics
+    # Compute standard metrics
     gn, gp, cf, category_stats = mpb.compute(normalize=True)
     
-    # Get class names
-    print(f"gn: {gn}, gp:{gp}, cf:{cf}")
+    # Compute CAD
+    accuracies = []
+    for idx in range(200):  # Assuming 200 classes
+        if mpb.class_total[idx] > 0:  # Avoid division by zero
+            accuracy = mpb.class_correct[idx] / mpb.class_total[idx]
+            accuracies.append(accuracy)
+    
+    accuracies = torch.tensor(accuracies)
+    mean_accuracy = torch.mean(accuracies)
+    cad = torch.sqrt(torch.mean((accuracies - mean_accuracy) ** 2))
+    
     # Print results
+    print(f"\nOverall Metrics:")
+    print(f"CAD: {cad:.4f}")
+    print(f"Global Negative Bias (Gn): {gn}")
+    print(f"Global Positive Bias (Gp): {gp}")
+    print(f"Confusion Factor (CF): {cf}")
+    
     print("\nCategory-wise Statistics:")
     for category in ['Easy', 'Medium', 'Hard']:
         stats = category_stats[category]
@@ -176,7 +204,20 @@ def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = '
         for idx in stats['class_indices']:
             print(f"  {idx}: {mpb.class_correct[idx]/mpb.class_total[idx]:.4f}")
         print()
+
+    # Save visualization
     plot_bias_analysis(category_stats, mpb, save_dir)
+    
+    # Return metrics dictionary
+    x= {
+        'cad': cad.item(),
+        'gn': gn,
+        'gp': gp,
+        'cf': cf,
+        'category_stats': category_stats,
+        'class_accuracies': accuracies.tolist()
+    }
+    print(x)
 
 def load_data():
     # Data loading code
@@ -212,5 +253,5 @@ def create_model(model_name, path=None):
 if __name__ == "__main__":
     "/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/cifar100/ckpt.pth"
     ckpt_path = "/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
-    save_dir = "./sreL2_Tiny_base"  # Specify your desired directory name
+    save_dir = "./base"  # Specify your desired directory name
     analyze_model_bias(ckpt_path, save_dir=save_dir,mode=False)
