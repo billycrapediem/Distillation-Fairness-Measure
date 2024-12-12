@@ -9,8 +9,9 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from tiny_imagenet_dataset import TinyImageNet
 import numpy as np
+import pandas as pd
 
-def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names, save_dir: str = "bias_analysis_plots"):
+def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, save_dir: str = "bias_analysis_plots"):
     """Create and save visualization plots for model prediction bias analysis."""
     
     # Create save directory if it doesn't exist
@@ -20,15 +21,23 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names, sa
     plt.figure(figsize=(10, 7))
     accuracies = []
     categories = []
+    
     for category in ['Easy', 'Medium', 'Hard']:
         stats = category_stats[category]
         class_accs = [mpb.class_correct[idx]/mpb.class_total[idx] for idx in stats['class_indices']]
         accuracies.extend(class_accs)
         categories.extend([category] * len(class_accs))
-    
-    sns.boxplot(x=categories, y=accuracies)
-    plt.title('Accuracy Distribution by Category')
-    plt.ylabel('Accuracy')
+    df = pd.DataFrame({
+        'Category': categories,
+        'Value': accuracies
+    })
+    sns.violinplot(data=df, x='Category', y='Value', 
+                  color='#03cffc',  # Light blue fill color
+                  inner='box',        # Show box plot inside violin
+                  linewidth=1.5) 
+    plt.title('Distribution by Category', pad=20)
+    plt.ylabel('Value')
+    plt.xlabel('')
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'accuracy_distribution.png'), dpi=300, bbox_inches='tight')
     plt.close()
@@ -75,18 +84,11 @@ def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, class_names, sa
     sorted_indices = np.argsort(all_accuracies)
     sorted_accs = np.array(all_accuracies)[sorted_indices]
     sorted_colors = np.array(category_colors)[sorted_indices]
-    sorted_class_names = np.array(class_names)[np.array(class_indices)[sorted_indices]]
     
     plt.bar(range(len(sorted_accs)), sorted_accs, color=sorted_colors)
     plt.title('Per-Class Accuracy (Sorted)')
     plt.xlabel('Class Index')
     plt.ylabel('Accuracy')
-    
-    # Add class names for some points
-    step = len(sorted_accs) // 10  # Show every nth class name
-    for i in range(0, len(sorted_accs), step):
-        plt.text(i, sorted_accs[i], sorted_class_names[i], 
-                rotation=45, ha='right', va='bottom')
     
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'per_class_accuracy.png'), dpi=300, bbox_inches='tight')
@@ -126,24 +128,26 @@ def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = '
     ])
     if mode:
     # Load CIFAR-100 test set
-        testset = torchvision.datasets.CIFAR100(root='./data', train=False,
+        testset = torchvision.datasets.CIFAR100(root='/scratch/bzhang44/SRe2L/SRe2L/*small_dataset/data', train=False,
                                            download=True, transform=transform)
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
+        model = torchvision.models.get_model("resnet18", num_classes=200)
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        model.maxpool = nn.Identity()
+        model = nn.DataParallel(model).cuda()
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint["state_dict"])
+        model = model.to(device)
     else:
         testset = load_data()
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
+        model = create_model('resnet18',model_path)
     # Load model
-    model = torchvision.models.get_model("resnet18", num_classes=100)
-    model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
-    model.maxpool = nn.Identity()
-    model = nn.DataParallel(model).cuda()
-    checkpoint = torch.load(model_path)
-    model.load_state_dict(checkpoint["state_dict"])
-    model = model.to(device)
+    
     model.eval()
     
     # Initialize bias calculator
-    mpb = ModelPredictionBias(num_classes=100)
+    mpb = ModelPredictionBias(num_classes=200)
     
     # Evaluate model
     with torch.no_grad():
@@ -157,7 +161,6 @@ def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = '
     gn, gp, cf, category_stats = mpb.compute(normalize=True)
     
     # Get class names
-    class_names = testset.classes
     print(f"gn: {gn}, gp:{gp}, cf:{cf}")
     # Print results
     print("\nCategory-wise Statistics:")
@@ -171,9 +174,9 @@ def analyze_model_bias(model_path: str, save_dir:str,mode=False ,device: str = '
         print(f"Mean Positive Bias (Gp): {stats['mean_gp']:.4f} ± {stats['std_gp']:.4f}")
         print("\nClasses in this category:")
         for idx in stats['class_indices']:
-            print(f"  {class_names[idx]}: {mpb.class_correct[idx]/mpb.class_total[idx]:.4f}")
+            print(f"  {idx}: {mpb.class_correct[idx]/mpb.class_total[idx]:.4f}")
         print()
-    plot_bias_analysis(category_stats, mpb, class_names, save_dir)
+    plot_bias_analysis(category_stats, mpb, save_dir)
 
 def load_data():
     # Data loading code
@@ -185,13 +188,29 @@ def load_data():
         transforms.ToTensor(),
         normalize,
     ])
-    dataset_test = TinyImageNet('./data', split='val', download=False, transform=val_transform)
+    dataset_test = TinyImageNet('/scratch/bzhang44/tiny-imagenet/data', split='val', download=False, transform=val_transform)
     print("Creating data loaders")
 
     return dataset_test
 
+def create_model(model_name, path=None):
+        model = torchvision.models.get_model(model_name, weights=None, num_classes=200)
+        model.conv1 = nn.Conv2d(3,64, kernel_size=(3,3), stride=(1,1), padding=(1,1), bias=False)
+        model.maxpool = nn.Identity()
+        if path is not None:
+            checkpoint = torch.load(path, map_location="cpu")
+            if "model" in checkpoint:
+                checkpoint = checkpoint["model"]
+            elif "state_dict" in checkpoint:
+                checkpoint = checkpoint["state_dict"]
+            if "module." in list(checkpoint.keys())[0]:
+                checkpoint = {k.replace("module.", ""): v for k, v in checkpoint.items()}
+            model.load_state_dict(checkpoint)
+        model.to("cuda")
+        return model
 
 if __name__ == "__main__":
-    ckpt_path = "./save_post_cifar100/ipc50/ckpt.pth"
-    save_dir = "./sreL2_cirfar"  # Specify your desired directory name
-    analyze_model_bias(ckpt_path, save_dir=save_dir,mod=True)
+    "/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/cifar100/ckpt.pth"
+    ckpt_path = "/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
+    save_dir = "./sreL2_Tiny_base"  # Specify your desired directory name
+    analyze_model_bias(ckpt_path, save_dir=save_dir,mode=False)
