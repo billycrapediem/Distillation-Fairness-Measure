@@ -229,7 +229,7 @@ def load_data():
         transforms.ToTensor(),
         normalize,
     ])
-    dataset_test = TinyImageNet('/scratch/bzhang44/tiny-imagenet/data', split='val', download=False, transform=val_transform)
+    dataset_test = TinyImageNet('/scratch/jnie7/tiny-imagenet/data', split='val', download=False, transform=val_transform)
     print("Creating data loaders")
 
     return dataset_test
@@ -252,6 +252,7 @@ def create_model(model_name, path=None):
 
 if __name__ == "__main__":
     "/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/cifar100/ckpt.pth"
-    ckpt_path = "/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
-    save_dir = "./base"  # Specify your desired directory name
+    ckpt_path = "./CDA/checkpoint_best.pth"
+    #"/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
+    save_dir = "./CDA_Tiny"  # Specify your desired directory name
     analyze_model_bias(ckpt_path, save_dir=save_dir,mode=False)
