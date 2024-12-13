@@ -233,7 +233,7 @@ def load_data():
         transforms.ToTensor(),
         normalize,
     ])
-    dataset_test = TinyImageNet('/scratch/bzhang44/tiny-imagenet/data', split='val', download=False, transform=val_transform)
+    dataset_test = TinyImageNet('/scratch/jnie7/tiny-imagenet/data', split='val', download=False, transform=val_transform)
     print("Creating data loaders")
 
     return dataset_test
