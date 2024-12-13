@@ -154,7 +154,11 @@ def analyze_model_bias(model_path: str, save_dir: str, mode=False, device: str =
     else:
         testset = load_data()
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-        model = create_model('resnet18', model_path)
+        model = torchvision.models.get_model("resnet18", num_classes=200)
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        model.maxpool = nn.Identity()
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
     
     model = model.to(device)
     model.eval()
@@ -252,6 +256,6 @@ def create_model(model_name, path=None):
 
 if __name__ == "__main__":
     "/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/cifar100/ckpt.pth"
-    ckpt_path = "/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
-    save_dir = "./base"  # Specify your desired directory name
+    ckpt_path ="/home/bzhang44/mtt-distillation/mixed_training_models/best_model.pth" #"/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
+    save_dir = "./mtt/"  # Specify your desired directory name
     analyze_model_bias(ckpt_path, save_dir=save_dir,mode=False)
