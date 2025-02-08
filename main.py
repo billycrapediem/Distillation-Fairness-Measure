@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from tiny_imagenet_dataset import TinyImageNet
 import numpy as np
 import pandas as pd
-
+import torch.optim as optim
 def plot_bias_analysis(category_stats, mpb: ModelPredictionBias, save_dir: str = "bias_analysis_plots"):
     """Create and save visualization plots for model prediction bias analysis."""
     
@@ -144,13 +144,45 @@ def analyze_model_bias(model_path: str, save_dir: str, mode=False, device: str =
             download=True, 
             transform=transform
         )
+        transform_train = transforms.Compose(
+    [
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ]
+)
+        trainset = torchvision.datasets.CIFAR100(root='/scratch/bzhang44/SRe2L/SRe2L/*small_dataset/data', train=True, download=True, transform=transform_train)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=128, shuffle=True, num_workers=2)    
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
-        model = torchvision.models.get_model("resnet18", num_classes=200)
+        model = torchvision.models.get_model("resnet18", num_classes=100)
         model.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
         model.maxpool = nn.Identity()
         model = nn.DataParallel(model).cuda()
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["state_dict"])
+        model = model.to(device)
+        """criterion = nn.CrossEntropyLoss()
+        optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=5e-4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=2)
+        model.train()
+        for epoch in range(2):
+            train_loss = 0
+            correct = 0
+            total = 0
+            for batch_idx, (inputs, targets) in enumerate(trainloader):
+                inputs, targets = inputs.to(device), targets.to(device)
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += targets.size(0)
+                correct += predicted.eq(targets).sum().item()
+            print(f"Epoch: [{epoch}], Acc@1 {100.*correct/total:.3f}, Loss {train_loss/(batch_idx+1):.4f}")
+            scheduler.step()"""
     else:
         testset = load_data()
         testloader = DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
@@ -159,12 +191,11 @@ def analyze_model_bias(model_path: str, save_dir: str, mode=False, device: str =
         model.maxpool = nn.Identity()
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint['model_state_dict'])
-    
-    model = model.to(device)
+        model = model.to(device)
     model.eval()
     
     # Initialize bias calculator
-    mpb = ModelPredictionBias(num_classes=200)
+    mpb = ModelPredictionBias(num_classes=100)
     
     # Evaluate model
     with torch.no_grad():
@@ -179,7 +210,7 @@ def analyze_model_bias(model_path: str, save_dir: str, mode=False, device: str =
     
     # Compute CAD
     accuracies = []
-    for idx in range(200):  # Assuming 200 classes
+    for idx in range(100):  # Assuming 200 classes
         if mpb.class_total[idx] > 0:  # Avoid division by zero
             accuracy = mpb.class_correct[idx] / mpb.class_total[idx]
             accuracies.append(accuracy)
@@ -256,6 +287,6 @@ def create_model(model_name, path=None):
 
 if __name__ == "__main__":
     "/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/cifar100/ckpt.pth"
-    ckpt_path ="/home/bzhang44/mtt-distillation/mixed_training_models/best_model.pth" #"/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
-    save_dir = "./mtt/"  # Specify your desired directory name
-    analyze_model_bias(ckpt_path, save_dir=save_dir,mode=False)
+    ckpt_path ="/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/cifar100/ckpt.pth" #"/scratch/bzhang44/tiny-imagenet/save/rn18_50ep/checkpoint_best.pth"#"/scratch/bzhang44/Distillation-Fairness-Measure/SRE2L/Tiny/checkpoint_best.pth"
+    save_dir = "./CIFAR"  # Specify your desired directory name
+    analyze_model_bias(ckpt_path, save_dir=save_dir,mode=True)
